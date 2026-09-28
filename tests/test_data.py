@@ -65,6 +65,24 @@ class DataTests(unittest.TestCase):
         self.assertEqual(frame.index[0], pd.Timestamp("2020-01-01"))
         self.assertEqual(audit["missing_days"], 0)
 
+    def test_reduced_precision_dates_cannot_invent_calendar_days(self):
+        for labels in (["2020", "2021"], ["2020-01", "2020-02"],
+                       ["2020-01-01", "2020-02"]):
+            with self.subTest(labels=labels):
+                raw = self.frame(2)
+                raw["Date"] = labels
+                with self.assertRaisesRegex(ValueError, "explicit calendar day"):
+                    validate_frame(raw)
+
+    def test_full_iso_midnight_timestamps_and_basic_dates_are_accepted(self):
+        for pattern in ("%Y-%m-%dT00:00:00Z", "%Y%m%d"):
+            with self.subTest(pattern=pattern):
+                raw = self.frame()
+                raw["Date"] = raw["Date"].dt.strftime(pattern)
+                frame, audit, _ = validate_frame(raw)
+                self.assertEqual(frame.index[0], pd.Timestamp("2020-01-01"))
+                self.assertEqual(audit["missing_days"], 0)
+
     def test_ambiguous_day_first_dates_are_rejected_not_permuted(self):
         raw = self.frame()
         raw["Date"] = raw["Date"].dt.strftime("%d/%m/%Y")
@@ -130,15 +148,29 @@ class DataTests(unittest.TestCase):
                 return self._content
 
         payload = self.frame().to_csv(index=False).encode()
-        entries = [Entry("coin.csv", payload), Entry("COIN.csv", payload), Entry("notes.txt", b"ignored")]
-        with tempfile.TemporaryDirectory() as directory, \
-                patch.object(Path, "iterdir", return_value=iter(entries)):
-            dataset = load_dataset(directory)
-        self.assertEqual(list(dataset.frames), ["coin"])
-        self.assertEqual(sorted(dataset.hashes), ["COIN.csv", "coin.csv"])
-        rejected = dataset.validation[dataset.validation["status"].eq("rejected")]
-        self.assertEqual(rejected["file"].tolist(), ["COIN.csv"])
-        self.assertIn("collision", rejected["reason"].iloc[0])
+        # The outcome must not depend on the directory order the filesystem returns.
+        for names in (["coin.csv", "COIN.csv"], ["COIN.csv", "coin.csv"]):
+            with self.subTest(order=names):
+                entries = [Entry(name, payload) for name in names] + [Entry("notes.txt", b"ignored")]
+                with tempfile.TemporaryDirectory() as directory, \
+                        patch.object(Path, "iterdir", return_value=iter(entries)):
+                    dataset = load_dataset(directory)
+                self.assertEqual(list(dataset.frames), ["COIN"])
+                self.assertEqual(sorted(dataset.hashes), ["COIN.csv", "coin.csv"])
+                rejected = dataset.validation[dataset.validation["status"].eq("rejected")]
+                self.assertEqual(rejected["file"].tolist(), ["coin.csv"])
+                self.assertIn("collision", rejected["reason"].iloc[0])
+
+    def test_loader_reads_basic_iso_dates_as_calendar_labels(self):
+        # An all-digit YYYYMMDD column would otherwise be parsed as integers and rejected.
+        with tempfile.TemporaryDirectory() as directory:
+            raw = self.frame()
+            raw["Date"] = raw["Date"].dt.strftime("%Y%m%d")
+            raw.to_csv(Path(directory) / "coin.csv", index=False)
+            dataset = load_dataset(Path(directory))
+        self.assertEqual(dataset.validation["status"].tolist(), ["accepted"])
+        self.assertEqual(dataset.frames["coin"].index[0], pd.Timestamp("2020-01-01"))
+        self.assertEqual(len(dataset.frames["coin"]), 100)
 
     def test_volume_zero_preserved_negative_marked(self):
         raw = self.frame()

@@ -1,4 +1,4 @@
-# Cryptocurrency Volatility Prediction
+# Cryptocurrency Volatility Forecasting
 
 Historical cryptocurrency risk analysis and forecasting in Python: validate daily price histories, describe returns and drawdowns, and compare next-30-day volatility forecasts using chronological evaluation.
 
@@ -22,7 +22,7 @@ Read the [full generated report](results/reference/report.md), or inspect the [p
 
 ## Reproduce
 
-Use Python **3.9–3.12** and run from this directory. Dependencies are pinned to the reference run's versions; it used Python 3.11.7. Other supported environments may produce small floating-point differences.
+Use Python **3.9–3.12** and run from this directory. Dependencies are pinned to the reference run's versions; it used Python 3.9.6. Other supported environments may produce small floating-point differences.
 
 ```bash
 python3 -m venv .venv
@@ -33,7 +33,7 @@ python -m crypto_volatility --data data/sample --output results/sample
 python scripts/verify_results.py results/sample
 ```
 
-On Windows, activate the environment with `.venv\Scripts\activate`. The tests need no download. The [sample](data/sample) holds eight major-asset histories (under 1 MB) copied byte for byte from the source dataset. The uploader publishes the dataset on Kaggle under CC0 (public domain) and says the prices were collected by web scraping and with Python packages such as investpy, a Yahoo Finance client and pandas-datareader. The sample run takes a few seconds. Each asset's model is fitted separately, so its forecasts, per-asset errors and latest forecasts match the reference rows for those assets; a test enforces this.
+On Windows, activate the environment with `.venv\Scripts\activate`. The tests need no download. The [sample](data/sample) holds eight major-asset histories (under 1 MB) copied byte for byte from the source dataset. The uploader publishes the dataset on Kaggle under CC0 (public domain) and says the prices were collected by web scraping and with Python packages such as investpy, a Yahoo Finance client and pandas-datareader. The sample run takes under half a minute. Each asset's model is fitted separately, so its forecasts, per-asset errors and latest forecasts match the reference rows for those assets; a test enforces this.
 
 To reproduce the full reference run, download the 98 histories first:
 
@@ -44,7 +44,7 @@ python -m crypto_volatility --output results/my_run
 python scripts/verify_results.py results/my_run
 ```
 
-The downloader verifies the source ZIP and every CSV against [the source manifest](data/source_manifest.json) and publishes them to `data/raw/` in one atomic step. If the network download fails, obtain the matching ZIP from the [Kaggle dataset](https://www.kaggle.com/datasets/kaushiksuresh147/top-10-cryptocurrencies-historical-dataset) and run `python scripts/download_data.py --zip /path/to/archive.zip`. Changed downloads fail checksum verification. Skip downloading if matching CSVs already exist in `data/raw/`. The analysis runs locally without a GUI or network once the data is present.
+The downloader verifies the source ZIP and every CSV against [the source manifest](data/source_manifest.json) and only then publishes them to `data/raw/`: by one atomic rename when that folder does not exist yet, otherwise by a checked copy that removes its partial files if it fails or is interrupted. If the network download fails, obtain the matching ZIP from the [Kaggle dataset](https://www.kaggle.com/datasets/kaushiksuresh147/top-10-cryptocurrencies-historical-dataset) and run `python scripts/download_data.py --zip /path/to/archive.zip`. Changed downloads fail checksum verification. Skip downloading if matching CSVs already exist in `data/raw/`. The analysis runs locally without a GUI or network once the data is present.
 
 Each analysis requires a new output directory; without `--output`, a run writes to a fresh `results/run-<UTC timestamp>/`. A run produces a full `report.md`, six figures, tables, forecasts, and `validated_daily_history.csv`. The full raw data and the 17 MB cleaned history are excluded from this repository; the reference folder contains the report, the selected derived results, and chart inputs.
 
@@ -61,9 +61,9 @@ python -m crypto_volatility --help
 
 The recorded Kaggle snapshot contains **127,745 source price rows**, spanning **18 July 2010–23 August 2022**, across 98 histories and a separate static leaderboard. Coverage differs by asset. This is the vendor's historical cross-section, not a point-in-time market universe; the leaderboard is excluded from modeling. See the [data conventions](data/README.md).
 
-Validation identified **650 missing calendar days** and **610 nonpositive closes**. Missing and invalid prices remain missing, with no interpolation or forward filling. Returns require consecutive valid calendar-day prices; a 30-day estimate requires 31 consecutive valid closes. Dates must be ISO 8601 labels (`YYYY-MM-DD`); a file with any other date layout is rejected rather than reordered. OHLC inconsistencies are audited separately from Close. See the [file-level audit](results/reference/data_validation.csv) and [dated quality events](results/reference/data_quality_events.csv).
+Validation identified **650 missing calendar days** and **610 nonpositive closes**. Missing and invalid prices remain missing, with no interpolation or forward filling. Returns require consecutive valid calendar-day prices; a 30-day estimate requires 31 consecutive valid closes. Dates must be ISO 8601 labels with an explicit calendar day (`YYYY-MM-DD`); incomplete year/month labels and ambiguous layouts are rejected rather than invented or reordered. OHLC inconsistencies are audited separately from Close. See the [file-level audit](results/reference/data_validation.csv) and [dated quality events](results/reference/data_quality_events.csv).
 
-[Summary statistics](results/reference/summary_statistics.csv) include daily log-return moments, price ranges, observed-price drawdowns, annualized volatility, and reported volume. Prices are labeled USD by the source; volume units and exchange close times are not established. Volume is normalized within each asset for visualization and excluded from the forecasting features. Zero volumes remain observed zeros, and missing dates can conceal deeper drawdowns.
+[Summary statistics](results/reference/summary_statistics.csv) include daily log-return moments, price ranges, observed-price drawdowns, annualized volatility, and reported volume. Prices are labeled USD by the source; volume units and exchange close times are not established. Volume is normalized within each asset for visualization and excluded from the forecasting features. The report flags sustained jumps in reported volume that more likely reflect changes in the source's volume units than trading activity. Zero volumes remain observed zeros, and missing dates can conceal deeper drawdowns.
 
 ![Trailing 30-day annualized volatility on a common historical window](results/reference/figures/rolling_volatility.png)
 
@@ -100,10 +100,10 @@ Adjacent targets overlap by 29 returns, so observations are dependent. A fixed 3
 | [model.py](crypto_volatility/model.py) | Features, expanding-window fitting, baselines, and matched-date scoring |
 | [report.py](crypto_volatility/report.py) | Statistics, figures, and generated analysis report |
 | [\_\_main\_\_.py](crypto_volatility/__main__.py) | Command line, run metadata, and failure-safe output writing |
-| [download_data.py](scripts/download_data.py) | Checksum-verified download with an atomic publish step |
-| [verify_results.py](scripts/verify_results.py) | Independent recalculation of target windows, per-asset and aggregate scores, latest-forecast dates and persistence values, training cutoffs, and source/code hashes |
-| [tests/](tests/) | Numerical, missing-data, chronology, download, and reporting regressions; an end-to-end run on synthetic inputs; the sample reproduction; and a check that the reference results came from the committed code |
+| [download_data.py](scripts/download_data.py) | Checksum-verified download, staged and verified before it is published |
+| [verify_results.py](scripts/verify_results.py) | Independent recalculation from the raw closes of every saved target, every available baseline forecast and every Ridge forecast (refitted with NumPy, without the package code), requested schedules, training cutoffs, and per-asset and aggregate scores; it also checks that the analyzed assets are exactly the accepted (or requested) histories, and verifies source, code and output hashes |
+| [tests/](tests/) | Numerical, missing-data, chronology, download, and reporting regressions; an end-to-end run on synthetic inputs; the sample reproduction; and checks that the reference results came from the committed code, that every reference table, figure and report is the file that run wrote, and that the score tables follow from the saved predictions |
 
-The [reference metadata](results/reference/run_metadata.json) records settings, versions, the data directory, source hashes, and code hashes. The [verification summary](results/reference/validation_summary.json) records independent recalculation checks. GitHub Actions lints the code, runs the tests on Python 3.9 and 3.12 without downloading the dataset, and checks the command line.
+The [reference metadata](results/reference/run_metadata.json) records settings, versions, the data directory, and source, code and output hashes. The [verification summary](results/reference/validation_summary.json) records independent recalculation checks. GitHub Actions lints the code, runs the tests on Python 3.9 and 3.12 without downloading the dataset, and checks the command line.
 
 [next_forecasts.csv](results/reference/next_forecasts.csv) contains projections from each asset's **last historical date**, with explicit target dates and unavailable forecasts. These are not live forecasts.

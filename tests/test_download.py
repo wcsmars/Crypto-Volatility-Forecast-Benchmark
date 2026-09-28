@@ -8,6 +8,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
+from unittest.mock import patch
 
 from scripts.download_data import extract_csvs, load_manifest, main, publish
 
@@ -46,6 +47,25 @@ class DownloadTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 extract_csvs(self.archive([("coin.csv", "new")]), destination)
             self.assertEqual((destination / "coin.csv").read_text(), "original")
+
+    def test_existing_dangling_symlink_is_not_followed(self):
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "data"
+            destination.mkdir()
+            outside = Path(directory) / "outside.csv"
+            (destination / "coin.csv").symlink_to(outside)
+            with self.assertRaises(FileExistsError):
+                extract_csvs(self.archive([("coin.csv", "new")]), destination)
+            self.assertFalse(outside.exists())
+
+    def test_only_members_with_a_csv_suffix_are_extracted(self):
+        # A bare ".csv" dotfile has no suffix, so it could never be hash-checked.
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory) / "data"
+            count = extract_csvs(self.archive([("coin.csv", "a"), ("dir/.csv", "b"), ("notes.txt", "c")]),
+                                 destination)
+            self.assertEqual(count, 1)
+            self.assertEqual([path.name for path in destination.iterdir()], ["coin.csv"])
 
 
 class DownloadMainTests(unittest.TestCase):
@@ -106,6 +126,31 @@ class DownloadMainTests(unittest.TestCase):
         # The published directory must not keep mkdtemp's owner-only mode.
         self.assertEqual(stat.S_IMODE(self.output.stat().st_mode), 0o777 & ~mask)
 
+    def test_uppercase_csv_extension_is_verified_and_published(self):
+        self.FILES = [("sub/ALPHA.CSV", "Date,Close\n2020-01-01,1\n")]
+        self.payload = self.archive(self.FILES)
+        self.zip.write_bytes(self.payload)
+        code, message = self.run_main(self.manifest())
+        self.assertEqual(code, 0, message)
+        self.assertEqual(sorted(p.name for p in self.output.iterdir()), ["ALPHA.CSV"])
+
+    def test_local_archive_size_limit_applies_before_hashing(self):
+        with patch("scripts.download_data.MAX_DOWNLOAD_BYTES", len(self.payload) - 1):
+            code, message = self.run_main(self.manifest())
+        self.assertEqual(code, 1)
+        self.assertIn("Unexpected download size", message)
+        self.assertFalse(self.output.exists())
+
+    def test_network_path_uses_the_same_verification(self):
+        manifest = self.manifest()
+        stdout = io.StringIO()
+        with patch("scripts.download_data.urllib.request.urlopen", return_value=io.BytesIO(self.payload)) as request:
+            with contextlib.redirect_stdout(stdout):
+                code = main(["--output", str(self.output), "--manifest", str(manifest)])
+        self.assertEqual(code, 0)
+        self.assertEqual(request.call_args.kwargs["timeout"], 60)
+        self.assertEqual((self.output / "beta.csv").read_text(), self.FILES[1][1])
+
     def test_changed_archive_is_refused_without_writing(self):
         code, message = self.run_main(self.manifest(archive_sha256="0" * 64))
         self.assertEqual(code, 1)
@@ -158,6 +203,45 @@ class DownloadMainTests(unittest.TestCase):
         (self.output / "ALPHA.CSV").unlink()
         publish(staging, self.output)
         self.assertEqual((self.output / "alpha.csv").read_text(), "new")
+
+    def test_failed_publish_rolls_back_only_created_files(self):
+        staging = self.root / "staging"
+        staging.mkdir()
+        (staging / "alpha.csv").write_text("first")
+        (staging / "beta.csv").write_text("second")
+        self.output.mkdir(parents=True)
+        (self.output / "keep.txt").write_text("existing")
+        read_bytes = Path.read_bytes
+
+        def fail_second_read(path):
+            if path == staging / "beta.csv":
+                raise OSError("simulated read failure")
+            return read_bytes(path)
+
+        with patch.object(Path, "read_bytes", fail_second_read):
+            with self.assertRaisesRegex(OSError, "simulated read failure"):
+                publish(staging, self.output)
+        self.assertEqual([path.name for path in self.output.iterdir()], ["keep.txt"])
+        self.assertEqual((self.output / "keep.txt").read_text(), "existing")
+
+    def test_interrupted_publish_rolls_back_created_files(self):
+        staging = self.root / "staging"
+        staging.mkdir()
+        for name in ("alpha.csv", "beta.csv", "gamma.csv"):
+            (staging / name).write_text(name)
+        self.output.mkdir(parents=True)
+        read_bytes = Path.read_bytes
+
+        def interrupt_third_read(path):
+            if path == staging / "gamma.csv":
+                raise KeyboardInterrupt
+            return read_bytes(path)
+
+        with patch.object(Path, "read_bytes", interrupt_third_read):
+            with self.assertRaises(KeyboardInterrupt):
+                publish(staging, self.output)
+        # No partial dataset is left behind to block a retry.
+        self.assertEqual(list(self.output.iterdir()), [])
 
 
 if __name__ == "__main__":

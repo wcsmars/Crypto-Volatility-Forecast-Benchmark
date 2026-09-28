@@ -16,6 +16,7 @@ from sklearn.preprocessing import StandardScaler
 
 
 HORIZON = 30
+RIDGE_ALPHA = 1.0
 ANNUALIZATION = np.sqrt(365.0)
 MODELS = ("Persistence", "Historical90", "Ridge")
 FEATURE_COLUMNS = tuple(
@@ -110,7 +111,7 @@ def _eligible_training(features: pd.DataFrame, origin: pd.Timestamp) -> pd.DataF
 
 
 def _fit_ridge(training: pd.DataFrame):
-    model = make_pipeline(StandardScaler(), Ridge(alpha=1.0))
+    model = make_pipeline(StandardScaler(), Ridge(alpha=RIDGE_ALPHA))
     model.fit(
         training.loc[:, list(FEATURE_COLUMNS)],
         np.log1p(training["target_volatility"].to_numpy(dtype=float)),
@@ -219,8 +220,11 @@ def backtest_asset(
 
     final_origin = features.index[-1]
     last_test_origin = final_origin - pd.Timedelta(days=HORIZON)
-    first_test_origin = max(
-        features.index[0], last_test_origin - pd.Timedelta(days=test_days - 1)
+    # Clamp before building a Timedelta: an oversized test_days means every
+    # available origin and must not overflow pandas' Timedelta range.
+    available_days = (last_test_origin - features.index[0]).days + 1
+    first_test_origin = last_test_origin - pd.Timedelta(
+        days=min(test_days, available_days) - 1
     )
     origins = features.index[
         (features.index >= first_test_origin) & (features.index <= last_test_origin)
@@ -377,13 +381,21 @@ def score_predictions(predictions: pd.DataFrame) -> pd.DataFrame:
                 model_rows = successful.loc[successful["model"].eq(model_name)]
                 scored = model_rows.loc[model_rows["origin"].isin(shared)]
                 errors = (scored["predicted"] - scored["actual"]).to_numpy(dtype=float)
+                mae = rmse = np.nan
+                if len(errors):
+                    scale = float(np.max(np.abs(errors)))
+                    # A finite forecast can still overflow when errors are
+                    # summed or squared; scaling also avoids tiny-error underflow.
+                    normalized = errors / scale if scale else errors
+                    mae = float(np.mean(np.abs(normalized)) * scale)
+                    rmse = float(np.sqrt(np.mean(normalized ** 2)) * scale)
                 results.append({
                     "asset": asset, "model": model_name, "sample": sample,
                     "n_requested": len(requested),
                     "n_model_valid": int(model_rows["origin"].isin(requested).sum()),
                     "n_scored": len(scored),
                     "coverage": len(scored) / len(requested) if len(requested) else 0.0,
-                    "mae": float(np.mean(np.abs(errors))) if len(errors) else np.nan,
-                    "rmse": float(np.sqrt(np.mean(errors ** 2))) if len(errors) else np.nan,
+                    "mae": mae,
+                    "rmse": rmse,
                 })
     return pd.DataFrame(results, columns=METRIC_COLUMNS)

@@ -136,6 +136,31 @@ class BacktestTests(unittest.TestCase):
         self.assertFalse(np.allclose(one["actual"], two["actual"]))
         pd.testing.assert_series_equal(one["n_train"], two["n_train"])
 
+    def test_min_train_threshold_is_inclusive_at_both_origins(self):
+        frame = daily_frame()
+        _, _, probe = backtest_asset(frame, "Coin", test_days=45)
+        for count, name in (("n_train_initial", "backtest_status"), ("n_train_latest", "latest_status")):
+            exact = probe[count]
+            with self.subTest(count=count, min_train=exact):
+                _, _, status = backtest_asset(frame, "Coin", test_days=45, min_train=exact)
+                self.assertEqual(status[name], "ok")
+            with self.subTest(count=count, min_train=exact + 1):
+                predictions, latest, status = backtest_asset(frame, "Coin", test_days=45, min_train=exact + 1)
+                self.assertNotEqual(status[name], "ok")
+                rows = predictions if count == "n_train_initial" else latest
+                self.assertTrue(rows["status"].eq("insufficient_training").all())
+
+    def test_oversized_test_window_uses_every_available_origin(self):
+        # Beyond pandas' Timedelta range (about 106,752 days) this must not overflow.
+        frame = daily_frame(400)
+        available, latest, _ = backtest_asset(frame, "Coin", test_days=400)
+        for test_days in (10 ** 6, 10 ** 9):
+            with self.subTest(test_days=test_days):
+                predictions, latest_rows, _ = backtest_asset(frame, "Coin", test_days=test_days)
+                pd.testing.assert_frame_equal(predictions, available)
+                pd.testing.assert_frame_equal(latest_rows, latest)
+        self.assertEqual(available["origin"].nunique(), 400 - 30)
+
     def test_short_history_is_explicitly_skipped(self):
         predictions, latest, status = backtest_asset(daily_frame(300), "Short")
         self.assertEqual(status["backtest_status"], "skipped")
@@ -197,6 +222,22 @@ class BacktestTests(unittest.TestCase):
 
 
 class ScoringTests(unittest.TestCase):
+    def test_finite_extreme_errors_have_finite_accurate_metrics(self):
+        origins = pd.date_range("2020-01-01", periods=2, freq="D")
+        for scale in (1e-200, 1e200, np.finfo(float).max):
+            with self.subTest(scale=scale):
+                rows = [{
+                    "asset": "Coin", "model": model, "origin": origin,
+                    "target_start": origin + pd.Timedelta(days=1),
+                    "target_end": origin + pd.Timedelta(days=30),
+                    "actual": 0.0, "predicted": fraction * scale, "status": "ok",
+                } for origin, fraction in zip(origins, (0.5, 1.0)) for model in MODELS]
+                with np.errstate(over="raise", invalid="raise", divide="raise"):
+                    metrics = score_predictions(pd.DataFrame(rows))
+                daily = metrics.loc[metrics["sample"].eq("daily_origins")]
+                np.testing.assert_allclose(daily["mae"] / scale, 0.75, rtol=1e-14)
+                np.testing.assert_allclose(daily["rmse"] / scale, np.sqrt(0.625), rtol=1e-14)
+
     def test_common_dates_and_nonoverlap_schedule_survive_missing_rows(self):
         predictions, _, _ = backtest_asset(daily_frame(), "Coin", test_days=61)
         first_origin = predictions["origin"].min()

@@ -31,17 +31,24 @@ def load_manifest(path: Path) -> dict:
     if not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest):
         raise ValueError(f"{path}: 'archive_sha256' must be a 64-character hexadecimal SHA-256")
     if not isinstance(files, dict) or not files or any(
-        not isinstance(name, str) or not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
+        not isinstance(name, str) or Path(name).name != name or "/" in name or "\\" in name
+        or Path(name).suffix.casefold() != ".csv"
+        or not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value)
         for name, value in files.items()
     ):
         raise ValueError(f"{path}: 'files' must map every CSV name to a SHA-256 digest")
+    if len({name.casefold() for name in files}) != len(files):
+        raise ValueError(f"{path}: 'files' contains colliding CSV filenames")
     return manifest
 
 
 def extract_csvs(payload: bytes, destination: Path) -> int:
     """Validate ZIP members before writing; flatten CSVs without overwriting."""
     with zipfile.ZipFile(io.BytesIO(payload)) as archive:
-        members = [m for m in archive.infolist() if not m.is_dir() and m.filename.lower().endswith(".csv")]
+        # The same suffix rule as the manifest and the loader: a bare ".csv" dotfile
+        # has no suffix and is never staged, so every staged file is hash-checked.
+        members = [m for m in archive.infolist()
+                   if not m.is_dir() and Path(m.filename).suffix.casefold() == ".csv"]
         if not members:
             raise ValueError("Downloaded archive contains no CSV files")
         names = [Path(m.filename).name for m in members]
@@ -52,11 +59,13 @@ def extract_csvs(payload: bytes, destination: Path) -> int:
         destination.mkdir(parents=True, exist_ok=True)
         # Read all files (including CRC checks) before changing the destination.
         contents = {name: archive.read(member) for name, member in zip(names, members)}
+        existing = {p.name.casefold() for p in destination.iterdir()}
         for name in contents:
-            if (destination / name).exists():
+            if name.casefold() in existing:
                 raise FileExistsError(f"Refusing to overwrite {destination / name}; use a new directory")
         for name, data in contents.items():
-            (destination / name).write_bytes(data)
+            with (destination / name).open("xb") as target:
+                target.write(data)
     return len(contents)
 
 
@@ -79,9 +88,19 @@ def publish(staging: Path, output: Path) -> None:
     clashes = [p.name for p in staged if p.name.casefold() in existing]
     if clashes:
         raise FileExistsError(f"Refusing to overwrite existing files in {output}: {', '.join(clashes)}")
-    for file in staged:
-        with (output / file.name).open("xb") as target:
-            target.write(file.read_bytes())
+    created = []
+    try:
+        for file in staged:
+            destination = output / file.name
+            with destination.open("xb") as target:
+                created.append(destination)
+                target.write(file.read_bytes())
+    except BaseException:
+        # A full disk, failed source read or Ctrl-C must not leave a partial
+        # dataset which then prevents a retry. Preserve pre-existing output files.
+        for destination in reversed(created):
+            destination.unlink()
+        raise
 
 
 def main(argv=None):
@@ -97,14 +116,15 @@ def main(argv=None):
         manifest = load_manifest(args.manifest)
         if args.zip:
             stage = f"Reading {args.zip}"
-            payload = args.zip.read_bytes()
+            with args.zip.open("rb") as source:
+                payload = source.read(MAX_DOWNLOAD_BYTES + 1)
         else:
             stage = "Download"
             request = urllib.request.Request(URL, headers={"User-Agent": "crypto-volatility/1.0"})
             with urllib.request.urlopen(request, timeout=60) as response:
                 payload = response.read(MAX_DOWNLOAD_BYTES + 1)
-            if len(payload) > MAX_DOWNLOAD_BYTES:
-                raise ValueError("Unexpected download size (over 50 MB)")
+        if len(payload) > MAX_DOWNLOAD_BYTES:
+            raise ValueError("Unexpected download size (over 50 MB)")
         stage = "Verification"
         digest = hashlib.sha256(payload).hexdigest()
         if digest != manifest["archive_sha256"]:
@@ -117,7 +137,8 @@ def main(argv=None):
         try:
             stage = "Verification"
             count = extract_csvs(payload, staging)
-            hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in staging.glob("*.csv")}
+            # Hash every staged file, so the published set is exactly the verified set.
+            hashes = {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in staging.iterdir()}
             if hashes != manifest["files"]:
                 raise ValueError("CSV hashes do not match source manifest")
             stage = "Publishing"

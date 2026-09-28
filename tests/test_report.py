@@ -12,7 +12,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from crypto_volatility.report import COLORS, _choose_panel, _macro_metrics, _small_multiples, _statistics
+from crypto_volatility.report import (
+    COLORS, _choose_panel, _macro_metrics, _small_multiples, _statistics, _volume_level_shifts,
+)
 
 
 def history(end, days, seed=0, blank_recent=0):
@@ -138,6 +140,19 @@ class ReportTests(unittest.TestCase):
         self.assertEqual(axis.get_yscale(), "symlog")
         np.testing.assert_array_equal(axis.lines[0].get_ydata(), [0, 1, 50000])
         self.assertGreater(axis.get_ylim()[1], 50000)
+
+    def test_sustained_volume_jumps_are_flagged_but_brief_spikes_are_not(self):
+        index = pd.date_range("2022-01-01", periods=40)
+        ratios = np.ones(40)
+        ratios[5:8] = 500.0      # a three-day spike: plausible trading activity
+        ratios[20:30] = 4000.0   # ten days at a new level: a probable unit change
+        ratios[25] = np.nan      # a missing day splits the run into 5 + 4 days, both too short
+        self.assertEqual(_volume_level_shifts(pd.DataFrame({"coin": ratios, "flat": 1.0}, index=index)), [])
+        ratios[25] = 4000.0
+        shifts = _volume_level_shifts(pd.DataFrame({"coin": ratios, "flat": 1.0}, index=index))
+        self.assertEqual([(run["asset"], run["start"], run["end"], run["days"], run["median_ratio"])
+                          for run in shifts],
+                         [("coin", pd.Timestamp("2022-01-21"), pd.Timestamp("2022-01-30"), 10, 4000.0)])
 
     def test_latest_valid_volatility_has_its_actual_date(self):
         frame = pd.DataFrame({"Close": [100, 101, np.nan],

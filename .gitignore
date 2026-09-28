@@ -11,6 +11,10 @@ data/raw/
 results/*/
 !results/reference/
 !results/reference/**
+# The re-include above must not bring back runtime files inside the reference folder.
+.DS_Store
+__pycache__/
+*.py[cod]
 *.egg-info/
 .env
 .env.*

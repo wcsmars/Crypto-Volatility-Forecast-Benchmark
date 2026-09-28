@@ -1,9 +1,9 @@
 {
   "status": "complete",
-  "created_at": "2026-09-23T06:59:26.979841+00:00",
+  "created_at": "2026-09-28T15:20:33.835548+00:00",
   "source_url": "https://www.kaggle.com/datasets/kaushiksuresh147/top-10-cryptocurrencies-historical-dataset",
   "data_directory": "data/raw",
-  "python": "3.11.7",
+  "python": "3.9.6",
   "packages": {
     "numpy": "2.0.2",
     "pandas": "2.2.3",
@@ -24,12 +24,12 @@
   },
   "code_hashes": {
     "crypto_volatility/__init__.py": "fc08b793bd097be06f0ef92b1b39ee2b5154b9ae8b64a5d66fb6f6d6786ad7fa",
-    "crypto_volatility/__main__.py": "46ae3a52eb1fa99e6367b7d46cb2438842ea3375fda6b450a5165d92736ef620",
-    "crypto_volatility/data.py": "b75d47faa6980559d6526bacdc41d4c733456a132698cb5b905de7aeefbfa329",
-    "crypto_volatility/model.py": "219da9ac20c69a13b9cdb5cbd7316295de1a9fcfbcd46b9583cce04790e5321b",
-    "crypto_volatility/report.py": "0884059643d7f065846f948cf67058e10d3b7e030b9ef2bc7a3885e186eadef6"
+    "crypto_volatility/__main__.py": "de015b861c91318e04ef4910e18ce89f302967d87009cd3c565df8ab95160db6",
+    "crypto_volatility/data.py": "39dd00a3e2b836afeaa20e62beea25476e5483c6931656ac2383bb3d9477db54",
+    "crypto_volatility/model.py": "209e293ce91a4ab0cb1e7a7ca4882df4046e72903c23264e77fb876fadac0875",
+    "crypto_volatility/report.py": "6fd75814d7a83731c6bcda554579f10144ffd9b3c8900b0b1a20618cbddf56f2"
   },
-  "interpretation": "Retrospective historical backtest; no live 2026 market forecast",
+  "interpretation": "Retrospective historical backtest; not a live market forecast",
   "input_hashes": {
     "1inch.csv": "da41d17172f40fc246813fc884f6a166a66a5b90591393d158b7f702dd40b261",
     "Aave.csv": "2a25b8691bacc57d6d43b053c58f93452fa16c1e702e08818a350ddad417a4e1",
@@ -236,7 +236,32 @@
     "2010-07-18T00:00:00",
     "2022-08-23T00:00:00"
   ],
-  "completed_at": "2026-09-23T06:59:44.157920+00:00",
+  "completed_at": "2026-09-28T15:20:58.028655+00:00",
   "successful_prediction_rows": 45684,
-  "scored_prediction_rows": 45684
+  "scored_prediction_rows": 45684,
+  "output_hashes": {
+    "backtest_metrics.csv": "dd080ad92d01479170c53f4cbcbb0ea6858b9f71117ce52f89d0e42d1c5e479a",
+    "backtest_predictions.csv": "6d2c7b36be25ace08eb627ee3087f541061dc7a4240588e7fc304e8b06d2c6fd",
+    "common_window_correlation_pair_counts.csv": "0d37511ff5cf991471fa35d76c62aa6a70e6ad530befb5b0f10f15db3b76dcc1",
+    "common_window_indexed_close.csv": "ad66b2fdf6fb7325ef848e60d9f373e9fb9fceab3851affc8d38fbf2c233f45e",
+    "common_window_log_returns.csv": "d09d87d2df8984e43a38e212e8efed200e732df38d579b21ebb5929991a3f061",
+    "common_window_normalized_reported_volume.csv": "d4590c8ec68604975d89ff72eebad8e07facfe1205ac02f8b8d84cc1335fe920",
+    "common_window_return_correlations.csv": "5108ff4ecdb7f7a88c978b07cb41507d42600bc90c27be9d85a0d93b27e807de",
+    "common_window_statistics.csv": "cf163c72b997ea8cdee23d5f6853a94a7f2e9cdc8df9b9ac777b905ed0e2357a",
+    "common_window_volatility_30.csv": "5610e7376320b63aa36b16ba6a23a5f85ede09a28d78148866b5b19f36db6185",
+    "data_quality_events.csv": "d60f595094b0cda695017330c6d3ac91cac9f12cef68ced7954d096a4ca63149",
+    "data_validation.csv": "a5fa806da2672e534d82f664f7b86406bdbb13c59640add3f10da4980b9d41c0",
+    "figures/forecast_comparison.png": "e58b9ca302ca67bc91eb994419af10b7f7de38a38bcaeb7258f0f03448e8b68b",
+    "figures/indexed_prices.png": "f661d335a524b96f76615499b2604c45dedcf8d51c78fc351dfed254d25e936e",
+    "figures/normalized_volume.png": "338dfd9236588330c66ce31440e7a8f6edaadb87e3b3fb2dcf4bb4b7c0c214b4",
+    "figures/return_correlations.png": "c70ae12f34368b04da78059f8486c56e79253fcc25d13c7e80e0530527e334a3",
+    "figures/return_distributions.png": "8997968ab735e2c1aae7dcbc32ae6b5ce960b4ad87e17b737022fc13ecb443b7",
+    "figures/rolling_volatility.png": "927e149ac83826ac5044707edf2fb4bb0d045f3084ce5c1ee62bcde1aa5f3c4e",
+    "macro_metrics.csv": "1d0da7efe000653456f13acf8238269083bf7ead747eb90228f098f531855f10",
+    "model_status.json": "6c6149fe4c3ccc157fd17c3584a30ac252c0d26af51a8f10d1f47d97f0a9f7e0",
+    "next_forecasts.csv": "b1f2ae04d12459cc4811fbe9787abd196a1b9fd18216aa5139e15525f53634cd",
+    "report.md": "120fe7a6e721bb433203540f21efab5cc50f0ead668d9532b878d6f4fc623c05",
+    "summary_statistics.csv": "36d0870850375205450d2c6e1d929e71b57c791bbd716a7efd4de5059833964b",
+    "validated_daily_history.csv": "14cb13aa7eb61ae22b53c2e462c67f2f43de16dc810b7f1cd88e51a05b347f0a"
+  }
 }

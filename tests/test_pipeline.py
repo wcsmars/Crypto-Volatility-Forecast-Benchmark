@@ -11,9 +11,11 @@ import hashlib
 import io
 import json
 import os
+import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 os.environ.setdefault("MPLCONFIGDIR", str(Path(__file__).resolve().parents[1] / ".mplconfig"))
 os.environ.setdefault("MPLBACKEND", "Agg")
@@ -106,6 +108,10 @@ class PipelineTests(unittest.TestCase):
             "crypto_volatility/__init__.py", "crypto_volatility/__main__.py", "crypto_volatility/data.py",
             "crypto_volatility/model.py", "crypto_volatility/report.py",
         })
+        self.assertEqual(metadata["configuration"]["ridge_alpha"], 1.0)
+        artifacts = {p.relative_to(self.output).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+                     for p in self.output.rglob("*") if p.is_file() and p.name != "run_metadata.json"}
+        self.assertEqual(metadata["output_hashes"], artifacts)
 
     def test_validation_reports_each_input_disposition(self):
         validation = pd.read_csv(self.output / "data_validation.csv").set_index("file")
@@ -152,6 +158,14 @@ class PipelineTests(unittest.TestCase):
         self.assertEqual(summary["metric_rows_independently_recalculated"], 3 * 2 * 3)
         self.assertEqual(summary["macro_rows_independently_recalculated"], 2 * 3)
         self.assertEqual(summary["latest_persistence_forecasts_recalculated"], 3)
+        self.assertEqual(summary["assets_verified"], 3)
+        self.assertEqual(summary["source_files_rejected"], 1)
+        self.assertEqual(summary["latest_ridge_forecasts_refitted"], 3)
+        self.assertGreater(summary["backtest_ridge_forecasts_refitted"], 0)
+        self.assertLess(summary["max_absolute_ridge_difference"], 1e-9)
+        # Every artifact of the run, including the report and figures, is hash-checked.
+        self.assertEqual(summary["output_files_recorded"], 23)
+        self.assertEqual(summary["ridge_forecasts_rounding_sensitive"], 0)
         # The recorded data directory lets the verifier run without --data.
         metadata = json.loads((self.output / "run_metadata.json").read_text())
         self.assertEqual(Path(metadata["data_directory"]), self.data.resolve())
@@ -159,10 +173,7 @@ class PipelineTests(unittest.TestCase):
 
     def copy_run(self, directory):
         copy = Path(directory) / "run"
-        copy.mkdir()
-        for name in ("run_metadata.json", "backtest_predictions.csv", "backtest_metrics.csv",
-                     "macro_metrics.csv", "next_forecasts.csv"):
-            (copy / name).write_bytes((self.output / name).read_bytes())
+        shutil.copytree(self.output, copy)
         return copy
 
     def test_verifier_rejects_a_tampered_prediction(self):
@@ -227,6 +238,57 @@ class PipelineTests(unittest.TestCase):
             (data / "extra.csv").write_text("Date,Close\n")
             with self.assertRaisesRegex(VerificationError, "unexpected \\['extra.csv'\\]"):
                 verify(self.output, data)
+
+    def test_verifier_rejects_a_changed_report_or_figure(self):
+        for name in ("report.md", "figures/indexed_prices.png"):
+            with self.subTest(artifact=name), tempfile.TemporaryDirectory() as directory:
+                copy = self.copy_run(directory)
+                (copy / name).write_bytes((self.output / name).read_bytes() + b"edited")
+                with self.assertRaisesRegex(VerificationError, "Artifact changed since the run"):
+                    verify(copy, self.data)
+
+    def test_interrupted_run_is_recorded_as_interrupted(self):
+        with tempfile.TemporaryDirectory() as directory, \
+                patch("crypto_volatility.__main__.backtest_asset", side_effect=KeyboardInterrupt):
+            output = Path(directory) / "interrupted"
+            code = run_main(["--data", str(self.data), "--output", str(output)])
+            self.assertEqual(code, 130)
+            metadata = json.loads((output / "run_metadata.json").read_text())
+            self.assertEqual(metadata["status"], "interrupted")
+            self.assertTrue((output / "error.txt").is_file())
+
+    def test_edge_case_histories_verify_independently(self):
+        # A text asset name that pandas would read as missing, a constant price
+        # (every Ridge input constant), and a gap inside the test window, which
+        # leaves Ridge rows without features. An oversized test window means
+        # every available origin and must verify too.
+        with tempfile.TemporaryDirectory() as directory:
+            data = Path(directory) / "raw"
+            data.mkdir()
+            write_asset(data / "NA.csv", seed=4)
+            write_asset(data / "gappy.csv", seed=5, drop_day=380)
+            flat = pd.read_csv(data / "NA.csv").assign(Open=1.0, High=1.0, Low=1.0, Close=1.0)
+            flat.to_csv(data / "flat.csv", index=False)
+            for test_days in ("20", "1000000000"):
+                with self.subTest(test_days=test_days):
+                    output = Path(directory) / f"run-{test_days}"
+                    code = run_main(["--data", str(data), "--output", str(output), "--test-days", test_days,
+                                     "--min-train", "50", "--refit-every", "10"])
+                    self.assertEqual(code, 0)
+                    predictions = pd.read_csv(output / "backtest_predictions.csv", keep_default_na=False,
+                                              na_values=[""])
+                    self.assertEqual(sorted(predictions["asset"].unique()), ["NA", "flat", "gappy"])
+                    summary = verify(output, data)
+                    self.assertEqual(summary["status"], "passed")
+                    self.assertEqual(summary["assets_verified"], 3)
+                    if test_days == "20":
+                        ridge = predictions[predictions["model"].eq("Ridge")].groupby("asset")["status"]
+                        self.assertIn("missing_features", set(ridge.get_group("gappy")))
+                        self.assertTrue(ridge.get_group("flat").eq("ok").all())
+                        self.assertEqual(summary["backtest_ridge_forecasts_refitted"], 20 + 20 + 10)
+                    else:
+                        # Every available origin starts at the first date, before any label matures.
+                        self.assertTrue(predictions["status"].eq("insufficient_training").all())
 
     def test_existing_output_directory_is_refused(self):
         with self.assertRaises(SystemExit):

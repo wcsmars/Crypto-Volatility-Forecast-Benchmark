@@ -36,7 +36,7 @@ Close-price changes range from **-83.2% for Cardano** to **-37.0% for BNB** acro
 
 Pairwise daily-return correlations range from **0.70** (Cardano/Dogecoin) to **0.88** (Bitcoin/Ethereum). These are return correlations on shared dates, not correlations between trending price levels; they establish no causal relationship.
 
-The largest reported-volume/own-median ratio in this panel is **50,770.0× for Bitcoin on 2022-03-16**. Such abrupt scale differences need source verification before economic interpretation. Normalization does not establish that volume units are stable over time. The volume figure uses a common scale that is linear from 0 to 1 and logarithmic above 1, preserving zeros and extreme observations.
+The largest reported-volume/own-median ratio in this panel is **50,770.0× for Bitcoin on 2022-03-16**. Reported volume stays above 30× the asset's own median for at least 7 consecutive days in Bitcoin (2022-03-04 to 2022-05-08, 66 days, median 5,471×); Ethereum (2022-03-04 to 2022-03-18, 15 days, median 1,778×); Litecoin (2021-08-24 to 2021-09-01, 9 days, median 63×); Litecoin (2021-09-04 to 2021-11-04, 62 days, median 111×); Litecoin (2022-03-04 to 2022-03-18, 15 days, median 79×). Sustained jumps of this size more likely reflect changes in the source's volume denomination than trading activity; they are not corrected, so these ratios are not evidence of volume surges. Such abrupt scale differences need source verification before economic interpretation. Normalization does not establish that volume units are stable over time. The volume figure uses a common scale that is linear from 0 to 1 and logarithmic above 1, preserving zeros and extreme observations.
 
 ![Normalized close prices on common calendar dates](figures/indexed_prices.png)
 

@@ -44,6 +44,15 @@ def validate_frame(raw: pd.DataFrame, asset: str = "asset"):
         raise ValueError("At least two source observations are required")
     if pd.api.types.is_numeric_dtype(raw["Date"]):
         raise ValueError("Dates must be calendar labels, not numeric timestamps")
+    # ISO 8601 permits reduced precision, but a year or month alone does not
+    # identify a daily observation. Pandas otherwise invents the first day.
+    explicit_day = raw["Date"].astype("string").str.match(
+        r"^(?:\d{4}-\d{2}-\d{2}|\d{8})(?:$|[T ])"
+    )
+    if not explicit_day.fillna(False).all():
+        raise ValueError(
+            "Dates must be unambiguous ISO 8601 labels with an explicit calendar day (YYYY-MM-DD)"
+        )
     # ISO 8601 only: day-first or mixed layouts such as 07/01/2020 would parse
     # element by element under format="mixed" and silently permute the calendar.
     try:
@@ -127,7 +136,9 @@ def load_dataset(path: Path) -> Dataset:
         raise ValueError(f"Data directory does not exist: {path}")
     frames, records, events, hashes = {}, [], [], {}
     seen = set()
-    for file in sorted(path.iterdir(), key=lambda p: p.name.casefold()):
+    # The exact name breaks case-insensitive ties, so which of two colliding
+    # files is modeled never depends on the filesystem's directory order.
+    for file in sorted(path.iterdir(), key=lambda p: (p.name.casefold(), p.name)):
         if not file.is_file() or file.suffix.casefold() != ".csv":
             continue
         contents = file.read_bytes()
@@ -140,7 +151,10 @@ def load_dataset(path: Path) -> Dataset:
             if file.stem.casefold() in seen:
                 raise ValueError("Case-insensitive asset-name collision")
             seen.add(file.stem.casefold())
-            clean, record, row_events = validate_frame(pd.read_csv(io.BytesIO(contents)), file.stem)
+            # Date labels stay text: an all-digit basic ISO date (YYYYMMDD) would
+            # otherwise be inferred as an integer and rejected as a numeric timestamp.
+            raw = pd.read_csv(io.BytesIO(contents), dtype={"Date": "string"})
+            clean, record, row_events = validate_frame(raw, file.stem)
             record["file"] = file.name
             frames[file.stem] = clean
             records.append(record)

@@ -15,8 +15,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .data import load_dataset
-from .model import backtest_asset, score_predictions
+from .data import DAYS_PER_YEAR, WINDOW, load_dataset
+from .model import HORIZON, RIDGE_ALPHA, backtest_asset, score_predictions
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -98,13 +98,13 @@ def main(argv=None):
             "python": platform.python_version(),
             "packages": {name: _package_version(name) for name in RUNTIME_PACKAGES},
             "configuration": {"test_days": args.test_days, "min_train": args.min_train,
-                              "refit_every": args.refit_every, "ridge_alpha": 1.0,
-                              "window": 30, "forecast_horizon_days": 30,
-                              "ddof": 0, "days_per_year": 365,
+                              "refit_every": args.refit_every, "ridge_alpha": RIDGE_ALPHA,
+                              "window": WINDOW, "forecast_horizon_days": HORIZON,
+                              "ddof": 0, "days_per_year": DAYS_PER_YEAR,
                               "assets_filter": args.assets},
             "code_hashes": {p.relative_to(ROOT).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
                             for p in sorted((ROOT / "crypto_volatility").glob("*.py"))},
-            "interpretation": "Retrospective historical backtest; no live 2026 market forecast",
+            "interpretation": "Retrospective historical backtest; not a live market forecast",
         })
         write_json(args.output / "run_metadata.json", metadata)
         dataset = load_dataset(args.data)
@@ -151,16 +151,24 @@ def main(argv=None):
         metadata["successful_prediction_rows"] = int(predictions.status.eq("ok").sum())
         metadata["scored_prediction_rows"] = int(
             metrics.loc[metrics["sample"].eq("daily_origins"), "n_scored"].sum())
+        # Bind every artifact's bytes to this run, so a stale or edited copy of
+        # a table, figure or report cannot sit beside this metadata unnoticed.
+        metadata["output_hashes"] = {
+            p.relative_to(args.output).as_posix(): hashlib.sha256(p.read_bytes()).hexdigest()
+            for p in sorted(args.output.rglob("*")) if p.is_file() and p.name != "run_metadata.json"}
         write_json(args.output / "run_metadata.json", metadata)
         print(f"Report written to {args.output / 'report.md'}")
         return 0
-    except Exception as exc:
-        metadata["status"] = "failed"
-        metadata["error"] = f"{type(exc).__name__}: {exc}"
+    except (Exception, KeyboardInterrupt) as exc:
+        # An interrupted run must not keep claiming status "running".
+        interrupted = isinstance(exc, KeyboardInterrupt)
+        metadata["status"] = "interrupted" if interrupted else "failed"
+        metadata["error"] = "KeyboardInterrupt" if interrupted else f"{type(exc).__name__}: {exc}"
         write_json(args.output / "run_metadata.json", metadata)
         (args.output / "error.txt").write_text(traceback.format_exc())
-        print(f"Analysis failed: {exc}; details in {args.output / 'error.txt'}", file=sys.stderr)
-        return 1
+        print(f"Analysis {metadata['status']}: {metadata['error']}; details in {args.output / 'error.txt'}",
+              file=sys.stderr)
+        return 130 if interrupted else 1
 
 
 if __name__ == "__main__":

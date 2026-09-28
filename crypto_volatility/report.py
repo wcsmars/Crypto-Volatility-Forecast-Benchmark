@@ -239,6 +239,22 @@ def _small_multiples(panel: pd.DataFrame, labels: Dict[str, str], title: str, yl
     _finish(fig, path)
 
 
+def _volume_level_shifts(normalized: pd.DataFrame, threshold: float = 30.0, min_days: int = 7) -> List[dict]:
+    """Runs of at least ``min_days`` consecutive dates above ``threshold`` times an asset's own median.
+
+    Jumps of this size that persist for weeks more likely reflect a change in the
+    source's volume denomination than trading activity; they are reported, not corrected.
+    """
+    runs = []
+    for asset in normalized:
+        high = normalized[asset].gt(threshold)
+        for _, days in normalized[asset][high].groupby(high.ne(high.shift()).cumsum()[high]):
+            if len(days) >= min_days:
+                runs.append({"asset": asset, "start": days.index[0], "end": days.index[-1],
+                             "days": len(days), "median_ratio": float(days.median())})
+    return runs
+
+
 def _panel_outputs(frames: Dict[str, pd.DataFrame], output: Path) -> dict:
     assets, labels, start, end, selection = _choose_panel(frames)
     info = {"assets": assets, "labels": labels, "start": start, "end": end, "selection": selection}
@@ -524,8 +540,14 @@ def write_report(
         if not volume_max.empty:
             asset = volume_max.idxmax()
             date = panel["volume"][asset].idxmax()
-            lines += [f"The largest reported-volume/own-median ratio in this panel is **{volume_max[asset]:,.1f}× for {labels[asset]} on {_date(date)}**. "
-                      "Such abrupt scale differences need source verification before economic interpretation. Normalization does not establish that volume units are stable over time. "
+            text = f"The largest reported-volume/own-median ratio in this panel is **{volume_max[asset]:,.1f}× for {labels[asset]} on {_date(date)}**. "
+            shifts = _volume_level_shifts(panel["volume"])
+            if shifts:
+                text += ("Reported volume stays above 30× the asset's own median for at least 7 consecutive days in "
+                         + "; ".join(f"{labels[run['asset']]} ({_date(run['start'])} to {_date(run['end'])}, {run['days']} days, median {run['median_ratio']:,.0f}×)"
+                                     for run in shifts)
+                         + ". Sustained jumps of this size more likely reflect changes in the source's volume denomination than trading activity; they are not corrected, so these ratios are not evidence of volume surges. ")
+            lines += [text + "Such abrupt scale differences need source verification before economic interpretation. Normalization does not establish that volume units are stable over time. "
                       "The volume figure uses a common scale that is linear from 0 to 1 and logarithmic above 1, preserving zeros and extreme observations.", ""]
         lines += [
             "![Normalized close prices on common calendar dates](figures/indexed_prices.png)", "",
